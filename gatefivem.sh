@@ -49,44 +49,26 @@ change_server_target() {
     print_info "Membackup konfigurasi lama..."
     cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup.$(date +%Y%m%d_%H%M%S)
     cp /etc/nginx/stream.conf /etc/nginx/stream.conf.backup.$(date +%Y%m%d_%H%M%S)
-    cp /etc/nginx/web.conf /etc/nginx/web.conf.backup.$(date +%Y%m%d_%H%M%S)
     
     print_info "Menerapkan konfigurasi server baru..."
     
     # Download ulang file konfigurasi template
     wget -q https://raw.githubusercontent.com/MathiAs2Pique/Fivem-Proxy-Install.sh/main/files/nginx.conf -O /etc/nginx/nginx.conf
     wget -q https://raw.githubusercontent.com/MathiAs2Pique/Fivem-Proxy-Install.sh/main/files/stream.conf -O /etc/nginx/stream.conf
-    wget -q https://raw.githubusercontent.com/MathiAs2Pique/Fivem-Proxy-Install.sh/main/files/web.conf -O /etc/nginx/web.conf
     
-    # Terapkan IP baru untuk FiveM server
+    # Terapkan IP baru
     sed -i "s/ip_goes_here/$new_ip/g" /etc/nginx/nginx.conf
     sed -i "s/ip_goes_here/$new_ip/g" /etc/nginx/stream.conf
-    
-    # Dapatkan dan terapkan IP VPS untuk server_name
-    SERVER_IP=$(curl -s http://checkip.amazonaws.com 2>/dev/null || echo "localhost")
-    sed -i "s/server_name_goes_here/$SERVER_IP/g" /etc/nginx/web.conf
-    
-    print_info "Memvalidasi konfigurasi Nginx..."
-    if ! nginx -t 2>/dev/null; then
-        print_error "Konfigurasi Nginx tidak valid! Mengembalikan backup..."
-        cp /etc/nginx/nginx.conf.backup.$(date +%Y%m%d)* /etc/nginx/nginx.conf 2>/dev/null
-        cp /etc/nginx/stream.conf.backup.$(date +%Y%m%d)* /etc/nginx/stream.conf 2>/dev/null
-        cp /etc/nginx/web.conf.backup.$(date +%Y%m%d)* /etc/nginx/web.conf 2>/dev/null
-        systemctl restart nginx
-        exit 1
-    fi
     
     print_info "Memulai ulang Nginx..."
     systemctl restart nginx
     
     if [ $? -eq 0 ]; then
         print_success "Target server berhasil diubah ke: $new_ip"
-        print_success "IP VPS Anda: $SERVER_IP"
+        SERVER_IP=$(curl -s http://checkip.amazonaws.com 2>/dev/null || echo "localhost")
         echo "Anda sekarang dapat terhubung menggunakan: connect $SERVER_IP"
-        echo "Atau menggunakan HTTP: connect http://$SERVER_IP"
     else
-        print_error "Gagal memulai ulang Nginx. Cek konfigurasi atau log error dengan: nginx -t"
-        print_info "Backup tersimpan dengan timestamp. Gunakan 'systemctl status nginx' untuk detail error."
+        print_error "Gagal memulai ulang Nginx. Cek konfigurasi atau log error."
         exit 1
     fi
     
@@ -154,12 +136,15 @@ install_nginx
 
 # 3. Konfigurasi Firewall UFW
 print_info "Mengkonfigurasi firewall UFW..."
-ufw --force enable >/dev/null 2>&1
+# PENTING: Buka port SSH terlebih dahulu untuk mencegah kehilangan akses!
+ufw allow 22/tcp >/dev/null 2>&1
+ufw allow OpenSSH >/dev/null 2>&1
 ufw allow 80/tcp >/dev/null 2>&1
 ufw allow 443/tcp >/dev/null 2>&1
 ufw allow 30120/tcp >/dev/null 2>&1
 ufw allow 30120/udp >/dev/null 2>&1
-print_success "Konfigurasi firewall selesai."
+ufw --force enable >/dev/null 2>&1
+print_success "Konfigurasi firewall selesai (SSH, HTTP, HTTPS, FiveM)."
 
 # 4. Bersihkan konfigurasi Nginx sebelumnya
 print_info "Membersihkan konfigurasi default Nginx..."
@@ -174,14 +159,36 @@ print_info "Sekarang, harap masukkan data konfigurasi Anda."
 
 echo -e "--> Masukkan alamat IP (dengan port) dari server FiveM Anda (Contoh: 1.1.1.1:30120)"
 read -p "    Alamat IP & Port Server: " ip
+
+# Validasi input IP tidak boleh kosong
+if [ -z "$ip" ]; then
+    print_error "IP server tidak boleh kosong!"
+    exit 1
+fi
+
 echo ""
 # ==============================================================================
 
+# 5. Backup konfigurasi Nginx yang ada
+print_info "Membackup konfigurasi Nginx yang ada..."
+if [ -f "/etc/nginx/nginx.conf" ]; then
+    cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup.$(date +%Y%m%d_%H%M%S)
+fi
+
 # 5. Unduh file konfigurasi Nginx
 print_info "Mengunduh file konfigurasi proxy..."
-wget -q https://raw.githubusercontent.com/MathiAs2Pique/Fivem-Proxy-Install.sh/main/files/nginx.conf -O /etc/nginx/nginx.conf
-wget -q https://raw.githubusercontent.com/MathiAs2Pique/Fivem-Proxy-Install.sh/main/files/stream.conf -O /etc/nginx/stream.conf
-wget -q https://raw.githubusercontent.com/MathiAs2Pique/Fivem-Proxy-Install.sh/main/files/web.conf -O /etc/nginx/web.conf
+if ! wget -q https://raw.githubusercontent.com/MathiAs2Pique/Fivem-Proxy-Install.sh/main/files/nginx.conf -O /etc/nginx/nginx.conf; then
+    print_error "Gagal mengunduh nginx.conf. Periksa koneksi internet."
+    exit 1
+fi
+if ! wget -q https://raw.githubusercontent.com/MathiAs2Pique/Fivem-Proxy-Install.sh/main/files/stream.conf -O /etc/nginx/stream.conf; then
+    print_error "Gagal mengunduh stream.conf. Periksa koneksi internet."
+    exit 1
+fi
+if ! wget -q https://raw.githubusercontent.com/MathiAs2Pique/Fivem-Proxy-Install.sh/main/files/web.conf -O /etc/nginx/web.conf; then
+    print_error "Gagal mengunduh web.conf. Periksa koneksi internet."
+    exit 1
+fi
 
 # 6. Ganti placeholder di file konfigurasi dengan input pengguna
 print_info "Menerapkan konfigurasi kustom..."
@@ -191,9 +198,20 @@ sed -i "s/ip_goes_here/$ip/g" /etc/nginx/stream.conf
 SERVER_IP=$(curl -s http://checkip.amazonaws.com 2>/dev/null || echo "localhost")
 sed -i "s/server_name_goes_here/$SERVER_IP/g" /etc/nginx/web.conf
 
+# 7. Test konfigurasi Nginx sebelum restart
+print_info "Memeriksa konfigurasi Nginx..."
+if ! nginx -t >/dev/null 2>&1; then
+    print_error "Konfigurasi Nginx tidak valid! Periksa file konfigurasi."
+    nginx -t
+    exit 1
+fi
+
 # 7. Mulai ulang Nginx untuk menerapkan semua perubahan
 print_info "Memulai ulang Nginx untuk menerapkan semua perubahan..."
-systemctl restart nginx
+if ! systemctl restart nginx; then
+    print_error "Gagal memulai ulang Nginx. Periksa log: journalctl -xeu nginx"
+    exit 1
+fi
 
 # 8. Selesai
 echo ""
@@ -201,5 +219,14 @@ print_success "--- INSTALASI SELESAI! ---"
 SERVER_IP=$(curl -s http://checkip.amazonaws.com 2>/dev/null || echo "localhost")
 echo "Anda sekarang dapat terhubung ke server Anda menggunakan: connect $SERVER_IP"
 echo "Atau menggunakan HTTP: connect http://$SERVER_IP"
+echo ""
+print_info "Port yang dibuka:"
+echo "  - SSH: 22 (untuk akses VPS)"
+echo "  - HTTP: 80"
+echo "  - HTTPS: 443"
+echo "  - FiveM: 30120 (TCP/UDP)"
+echo ""
+print_info "Untuk melihat status Nginx: systemctl status nginx"
+print_info "Untuk melihat log error: journalctl -xeu nginx"
 
 exit 0
