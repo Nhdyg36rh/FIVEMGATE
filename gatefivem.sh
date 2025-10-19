@@ -137,6 +137,7 @@ install_nginx
 # 3. Konfigurasi Firewall UFW
 print_info "Mengkonfigurasi firewall UFW..."
 ufw --force enable >/dev/null 2>&1
+ufw allow 22/tcp >/dev/null 2>&1
 ufw allow 80/tcp >/dev/null 2>&1
 ufw allow 443/tcp >/dev/null 2>&1
 ufw allow 30120/tcp >/dev/null 2>&1
